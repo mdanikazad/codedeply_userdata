@@ -1,0 +1,35 @@
+#!/bin/bash -ex
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+TOMCAT_DIR="/opt/tomcat"
+USER="tomcat"
+BRANCH="release"
+SOURCE_DOMAIN="taqn-skill-nation"
+S3_URL="s3://taqn-skill-nation-build-artifact"
+
+echo "creating symbolic link of tomcat log"
+ln -s /opt/tomcat/logs/catalina.out /opt/tomcat/logs/catalina.log
+
+echo "stopping datadog log agent"
+systemctl stop datadog-agent
+
+echo "setting service value in datadog tomcat log configuration"
+find /etc/datadog-agent/conf.d/tomcat.d/config.yaml -print0 | xargs -0 sed -i "s%SERVICE%${SOURCE_DOMAIN}/${BRANCH}%g"
+
+echo "setting service value in datadog nginx log configuration"
+find /etc/datadog-agent/conf.d/nginx.d/config.yaml -print0 | xargs -0 sed -i "s%SERVICE%${SOURCE_DOMAIN}/${BRANCH}%g"
+
+echo "restarting datadog log agent"
+systemctl restart datadog-agent
+
+echo "copying and extracting branch specific build artifact"
+`which aws` s3 cp ${S3_URL}/${BRANCH}/ROOT.zip .
+unzip ./ROOT.zip
+
+echo "copying build artifact to tomcat root directory"
+mv ./target/ROOT.war ${TOMCAT_DIR}/webapps/ROOT.war
+
+echo "changing tomcat home directory permission back to tomcat user"
+chown -R ${USER}:${USER} ${TOMCAT_DIR}
+
+sleep 60
